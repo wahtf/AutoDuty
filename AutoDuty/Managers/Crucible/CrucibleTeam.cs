@@ -1,4 +1,6 @@
 using AutoDuty.Configurations;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -45,8 +47,10 @@ namespace AutoDuty.Managers
         public const int TeamSize  = 10;
         public const int FightSize = 3;
 
-        private static readonly string[]  DetailWindows = ["XBMMonsterBookDetail", "XBMPetActionDetail"];
-        private static readonly TimeSpan CacheInterval = TimeSpan.FromMilliseconds(750);
+        private static readonly string[] DetailWindows  = ["XBMMonsterBookDetail", "XBMPetActionDetail"];
+        private static readonly string[] WatchedWindows = [..DetailWindows, CrucibleUi.BestiaryWindow, CrucibleUi.TeamWindow];
+
+        private static readonly TimeSpan ReadDelay = TimeSpan.FromMilliseconds(250);
 
         private static SortedDictionary<uint, string>? sheetNames;
 
@@ -66,7 +70,24 @@ namespace AutoDuty.Managers
             }
         }
 
-        private static DateTime nextCacheRead;
+        private static DateTime? readAt;
+        private static DateTime  lastChange;
+
+        public static void Watch()
+        {
+            Svc.AddonLifecycle.RegisterListener(AddonEvent.PostSetup,           WatchedWindows, OnWindowChanged);
+            Svc.AddonLifecycle.RegisterListener(AddonEvent.PostRefresh,         WatchedWindows, OnWindowChanged);
+            Svc.AddonLifecycle.RegisterListener(AddonEvent.PostRequestedUpdate, WatchedWindows, OnWindowChanged);
+        }
+
+        public static void Unwatch() =>
+            Svc.AddonLifecycle.UnregisterListener(OnWindowChanged);
+
+        private static void OnWindowChanged(AddonEvent type, AddonArgs args)
+        {
+            lastChange =   DateTime.UtcNow;
+            readAt     ??= lastChange + ReadDelay;
+        }
 
         private static CrucibleCharacterData? Mine(bool create)
         {
@@ -203,9 +224,9 @@ namespace AutoDuty.Managers
         public static void UpdateCache()
         {
             DateTime now = DateTime.UtcNow;
-            if (now < nextCacheRead)
+            if (readAt is not { } due || now < due)
                 return;
-            nextCacheRead = now + CacheInterval;
+            readAt = lastChange + ReadDelay > now ? lastChange + ReadDelay : null;
 
             if (!Player.Available)
                 return;

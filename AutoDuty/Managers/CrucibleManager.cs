@@ -1,4 +1,6 @@
 using AutoDuty.Helpers;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using ECommons;
 using ECommons.Automation.NeoTaskManager;
 using ECommons.DalamudServices;
@@ -190,9 +192,14 @@ namespace AutoDuty.Managers
             bool board   = (running || bypass) && IsCrucibleTerritory(Svc.ClientState.TerritoryType);
 
             if (bypass && !running && !board && _taskManager.NumQueuedTasks == 0)
+            {
                 this.UpdateManualQueue();
+            }
             else
-                this.manualStep = ManualStep.Idle;
+            {
+                this.manualStep  = ManualStep.Idle;
+                this.manualAwake = true;
+            }
 
             if (!board)
             {
@@ -215,8 +222,26 @@ namespace AutoDuty.Managers
             Finished
         }
 
+        private static readonly string[] ManualWakeWindows = [CrucibleUi.TeamWindow, CrucibleUi.BoardList, "SelectString", "Talk"];
+
         private ManualStep manualStep;
         private DateTime   manualSince;
+        private bool       manualAwake = true;
+
+        internal void Watch()
+        {
+            CrucibleTeam.Watch();
+            Svc.AddonLifecycle.RegisterListener(AddonEvent.PostSetup, ManualWakeWindows, this.OnManualWindowOpened);
+        }
+
+        internal void Unwatch()
+        {
+            CrucibleTeam.Unwatch();
+            Svc.AddonLifecycle.UnregisterListener(this.OnManualWindowOpened);
+        }
+
+        private void OnManualWindowOpened(AddonEvent type, AddonArgs args) =>
+            this.manualAwake = true;
 
         private unsafe void UpdateManualQueue()
         {
@@ -225,7 +250,7 @@ namespace AutoDuty.Managers
             switch (this.manualStep)
             {
                 case ManualStep.Idle:
-                    if (!EzThrottler.Throttle("CrucibleManualQueue", 100))
+                    if (!this.manualAwake || !EzThrottler.Throttle("CrucibleManualQueue", 100))
                         return;
 
                     if (CrucibleUi.IsOpen(CrucibleUi.TeamWindow))
@@ -254,15 +279,23 @@ namespace AutoDuty.Managers
                     this.boardStep = 0;
 
                     if (Svc.Targets.Target?.BaseId != LaudaDataId)
-                        return;
-
-                    if (CrucibleUi.TryReady("SelectString", out AtkUnitBase* menu) && EzThrottler.Throttle("CrucibleOpenBoard", 1000))
                     {
-                        ChooseChallenge(menu);
+                        this.manualAwake = false;
+                        return;
+                    }
+
+                    if (CrucibleUi.TryReady("SelectString", out AtkUnitBase* menu))
+                    {
+                        if (EzThrottler.Throttle("CrucibleOpenBoard", 1000))
+                            ChooseChallenge(menu);
                     }
                     else if (GenericHelpers.TryGetAddonByName("Talk", out AtkUnitBase* talk) && GenericHelpers.IsAddonReady(talk))
                     {
                         AddonHelper.ClickTalk();
+                    }
+                    else
+                    {
+                        this.manualAwake = false;
                     }
 
                     return;
@@ -324,6 +357,8 @@ namespace AutoDuty.Managers
         {
             if (this.manualStep != step)
                 Svc.Log.Debug($"[Crucible] Testing queue: {this.manualStep} -> {step}");
+            if (step == ManualStep.Idle)
+                this.manualAwake = true;
             this.manualStep  = step;
             this.manualSince = now;
         }

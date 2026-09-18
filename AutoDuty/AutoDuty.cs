@@ -356,6 +356,7 @@ public sealed class AutoDuty : IDalamudPlugin
             this.squadronManager = new SquadronManager(this.taskManager);
             this.variantManager  = new VariantManager(this.taskManager);
             this.crucibleManager = new CrucibleManager(this.taskManager);
+            this.crucibleManager.Watch();
             this.actions         = new ActionsManager(Plugin, this.taskManager);
             this.overrideCamera   = new OverrideCamera();
             this.Overlay          = new Overlay();
@@ -2171,6 +2172,7 @@ public sealed class AutoDuty : IDalamudPlugin
         MultiboxUtility.Config?.MultiBox =  false;
         Svc.Framework.Update             -= this.Framework_Update;
         Svc.Framework.Update             -= SchedulerHelper.ScheduleInvoker;
+        this.crucibleManager?.Unwatch();
         FileHelper.FileSystemWatcher?.Dispose();
         FileHelper.fileWatcher?.Dispose();
         this.windowSystem?.RemoveAllWindows();
